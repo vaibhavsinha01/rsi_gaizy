@@ -69,11 +69,11 @@ class DeltaExchangeRFGaizy:
             
             # 1% stoploss
             if side == "buy":
-                sl_1_percent = entry_price * 0.99
-                sl_50_points = entry_price - 25
+                sl_1_percent = entry_price * 0.98
+                sl_50_points = entry_price - 15
             else:  # sell
-                sl_1_percent = entry_price * 1.01
-                sl_50_points = entry_price + 25
+                sl_1_percent = entry_price * 1.02
+                sl_50_points = entry_price + 15
             
             stoplosses.append(sl_1_percent)
             stoplosses.append(sl_50_points)
@@ -106,9 +106,9 @@ class DeltaExchangeRFGaizy:
         """Calculate take profit based on risk-reward ratio"""
         try:
             if side == "buy":
-                tp = entry_price * 1.01  # 2% profit
+                tp = entry_price * 1.02  # 2% profit
             else:  # sell
-                tp = entry_price * 0.99  # 2% profit
+                tp = entry_price * 0.98  # 2% profit
             
             print(f"Calculated take profit for {side}: {tp}")
             return tp
@@ -124,7 +124,7 @@ class DeltaExchangeRFGaizy:
             self.base_leverage = 1
 
     # working
-    def cancel_order(self, order_id="639401895", product_id=1699):
+    def cancel_order(self, order_id="639401895", product_id=1699,client_order_id="69204351"):
         try:
             method = "DELETE"
             path = "/v2/orders"
@@ -133,7 +133,8 @@ class DeltaExchangeRFGaizy:
             # Prepare JSON payload with both id and product_id
             payload = {
                 "id": int(order_id),
-                "product_id": int(product_id)
+                "product_id": int(product_id),
+                "client_order_id": int(client_order_id)
             }
             payload_json = json.dumps(payload, separators=(',', ':'))
 
@@ -576,9 +577,10 @@ class DeltaExchangeRFGaizy:
             if self.heikan_choice == 1:
                 self.calculate_heiken_ashi()
             self.df = self.rf.run_filter(self.df)
-            self.df['gaizy_color'] = self.Grsi.calculate_signals(df=self.df)
+            # self.df['gaizy_color'] = self.Grsi.calculate_signals(df=self.df)
             self.df['rsi'],self.df['rsi_buy'],self.df['rsi_sell'] = self.bsrsi.generate_signals(self.df['Close'])
             self.df.rename(columns={'Close':'close','Open':'open','High':'high','Low':'low','Volume':'volume'},inplace=True)
+            self.df['gaizy_color'] = self.Grsi.calculate_gainzy_colors(df=self.df)
             self.df,_ = calculate_inside_bar_boxes(self.df)
             columns_to_drop = [
                 'RF_UpperBand', 'RF_LowerBand', 'RF_Filter', 'RF_Trend',
@@ -760,7 +762,7 @@ class DeltaExchangeRFGaizy:
                     self.set_leverage_delta(value=self.base_leverage,product_id="1699")
                     self.leverage_check()
                     self.get_base_margin_size() # updates the self.base size
-                    self.place_order_market(side=side, size=self.base)
+                    self.place_order_market(side=side, size=int(self.base))
                     # import time
                     # time.sleep(1) # sleep for 1 seconds
 
@@ -771,7 +773,7 @@ class DeltaExchangeRFGaizy:
                         stop_limit_price=str(stop_limit),
                         take_profit_limit_price=str(tp_limit),
                         side=side,
-                        size=self.base
+                        size=int(self.base)
                     )
 
                 # self.dynamic_order_check()
