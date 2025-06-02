@@ -27,13 +27,16 @@ class DeltaExchangeRFGaizy:
         self.ib = None
         self.Grsi = RSIGainzy()
         self.current_order_id = None
-        self.base_leverage = 1
+        self.base_leverage = 2
         self.leverage_multiplier = 2
         self.max_leverage = 4
         self.last_price = None
         self.h_pos = 0
         self.flag = 0
         self.base = 1
+        self.account_balance = None
+        self.min_lot = 0.01
+        self.heikan_choice = 1
 
     def generate_signature(self,secret,message):
         try:
@@ -349,7 +352,6 @@ class DeltaExchangeRFGaizy:
     def get_market_price(self):
         last = self.df.iloc[-1]
         return last['close']
-    
 
     def get_usd_balance(self):
         """Get USD/USDT balance specifically"""
@@ -378,6 +380,25 @@ class DeltaExchangeRFGaizy:
         except Exception as e:
             print(f"Error getting USD balance: {e}")
             return None
+        
+    def get_base_margin_size(self):
+        try:
+            if hasattr(self,'df'):
+                if self.df is not None:
+                    self.account_balance = float(self.get_usd_balance())
+                    self.base_price = float(self.get_market_price()) * self.min_lot
+                    self.margin = self.account_balance/self.base_price
+                    self.base = self.margin/2 # use something like kelly's criteria
+                    print(f"You can trade for base_size {int(self.margin)} without using any leverage and {int(self.margin*self.base_leverage)} with base leverage")
+            else:
+                self.df = pd.read_csv(r"C:\Users\vaibh\OneDrive\Desktop\delta\ETHUSD_Final.csv")
+                self.account_balance = float(self.get_usd_balance())
+                self.base_price = float(self.get_market_price()) * self.min_lot
+                self.margin = self.account_balance/self.base_price
+                self.base = self.margin/2  # use something like the kelly's criteria's part
+                print(f"You can trade for base_size {int(self.margin)} without using any leverage and {int(self.margin*self.base_leverage)} with base leverage")
+        except Exception as e:
+            print(f"Exception in get_base_margin_size")
 
     def get_order_status(self, order_id):
         """Get order status"""
@@ -552,9 +573,8 @@ class DeltaExchangeRFGaizy:
     def calculate_signals(self):
         try:
             self.df.rename(columns={'close':'Close','open':'Open','high':'High','low':'Low','volume':'Volume'},inplace=True)
-            # self.calculate_heiken_ashi()
-            # self.df = self.Grsi.calculate_signals(self.df,rsi_length=10,smooth_length=3,overbought_level=60,oversold_level=40)
-            self.rsi()
+            if self.heikan_choice == 1:
+                self.calculate_heiken_ashi()
             self.df = self.rf.run_filter(self.df)
             self.df['gaizy_color'] = self.Grsi.calculate_signals(df=self.df)
             self.df['rsi'],self.df['rsi_buy'],self.df['rsi_sell'] = self.bsrsi.generate_signals(self.df['Close'])
@@ -562,7 +582,7 @@ class DeltaExchangeRFGaizy:
             self.df,_ = calculate_inside_bar_boxes(self.df)
             columns_to_drop = [
                 'RF_UpperBand', 'RF_LowerBand', 'RF_Filter', 'RF_Trend',
-                'IsIB', 'BoxHigh', 'BoxLow', 'BarColor'
+                'IsIB', 'BoxHigh', 'BoxLow', 'BarColor','rsi'
             ]
             self.df = self.df.drop(columns=columns_to_drop)
             # print(self.df)
@@ -739,6 +759,7 @@ class DeltaExchangeRFGaizy:
                     tp_limit = tp_price - 10 if side == "buy" else tp_price + 10
                     self.set_leverage_delta(value=self.base_leverage,product_id="1699")
                     self.leverage_check()
+                    self.get_base_margin_size() # updates the self.base size
                     self.place_order_market(side=side, size=self.base)
                     # import time
                     # time.sleep(1) # sleep for 1 seconds
@@ -832,7 +853,8 @@ class DeltaExchangeRFGaizy:
             import time
             time.sleep(5)
             self.connect()
-            self.get_usd_balance()
+            # self.get_usd_balance()
+            self.get_base_margin_size()
             pass
         except Exception as e:
             print(f"Exception in test run {e}")
@@ -844,8 +866,8 @@ if __name__ == "__main__":
     Debot = DeltaExchangeRFGaizy(api_key=api_key,api_secret=api_secret,base_url=base_url)
     while True:
         try:
-            # Debot.run()
-            Debot.test()
+            Debot.run()
+            # Debot.test()
             # Debot.test2()
         except Exception as e:
             print(f"Error in run : {e}")
