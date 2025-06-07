@@ -27,18 +27,15 @@ class DeltaExchangeRFGaizy:
         self.ib = None
         self.Grsi = RSIGainzy()
         self.current_order_id = None
-        self.base_leverage = 2
-        self.leverage_multiplier = 2
-        self.max_leverage = 4
+        self.base_leverage = 20
+        self.leverage_multiplier = 1
+        self.max_leverage = 10
         self.last_price = None
         self.flag = 0
         self.base = 1
         self.account_balance = None
-        self.min_lot = 0.01
+        self.min_lot = 100000
         self.heikan_choice = 1
-        self.last_trade_status = None
-        self.previous_position_size = 0
-        self.trade_entry_price = None
 
     def generate_signature(self,secret,message):
         try:
@@ -64,53 +61,29 @@ class DeltaExchangeRFGaizy:
             print(f"Error in get_current_datetime: {e}")
             return None
 
-    def calculate_stoploss(self, entry_price, side, candle_data=None):
-        """Calculate stoploss based on 1%, 50 points, or low of 2nd last candle"""
+    def calculate_stoploss(self,entry_price,side):
         try:
-            stoplosses = []
-            
-            # 1% stoploss
             if side == "buy":
-                sl_1_percent = entry_price * 0.99
-                sl_50_points = entry_price - 10
-            else:  # sell
-                sl_1_percent = entry_price * 1.01
-                sl_50_points = entry_price + 10
-            
-            stoplosses.append(sl_1_percent)
-            stoplosses.append(sl_50_points)
-            
-            # Low of 2nd last candle (if available)
-            if candle_data is not None and len(candle_data) >= 2:
-                second_last_low = candle_data.iloc[-2]['low']
-                if side == "buy":
-                    stoplosses.append(second_last_low)
-                else:  # sell - use high for sell orders
-                    second_last_high = candle_data.iloc[-2]['high']
-                    stoplosses.append(second_last_high)
-            
-            # Choose the most conservative stoploss
-            if side == "buy":
-                final_sl = max(stoplosses)  # Highest stoploss for buy
-                # final_sl = min(stoplosses)
+                # sl = entry_price * 0.99
+                sl = entry_price * 0.995
             else:
-                final_sl = min(stoplosses)  # Lowest stoploss for sell
-                # final_sl = max(stoplosses)
-            
-            print(f"Calculated stoploss for {side}: {final_sl}")
-            return final_sl
-            
+                # sl = entry_price * 1.01
+                sl = entry_price * 1.005
+            print(f"Calculated stop loss for {side}: {sl}")
+            return sl
+        
         except Exception as e:
-            print(f"Error in calculate_stoploss: {e}")
-            return None
+            print(f"Error occured in calculate_stoploss : {e}")
 
     def calculate_takeprofit(self, entry_price, side):
         """Calculate take profit based on risk-reward ratio"""
         try:
             if side == "buy":
-                tp = entry_price * 1.01  # 2% profit
+                # tp = entry_price * 1.01  # 2% profit
+                tp = entry_price * 1.01
             else:  # sell
-                tp = entry_price * 0.99  # 2% profit
+                # tp = entry_price * 0.99  # 2% profit
+                tp = entry_price * 0.99
             
             print(f"Calculated take profit for {side}: {tp}")
             return tp
@@ -121,9 +94,10 @@ class DeltaExchangeRFGaizy:
     
     def leverage_check(self):
         if self.base_leverage<self.max_leverage:
-            self.base_leverage = self.base_leverage * self.leverage_multiplier
+            # self.base_leverage = self.base_leverage * self.leverage_multiplier
+            self.base_leverage = 10
         else:
-            self.base_leverage = 1
+            self.base_leverage = 10
 
     # working
     import time
@@ -224,7 +198,7 @@ class DeltaExchangeRFGaizy:
         # finally working
         try:
             payload = {
-                "product_symbol":"ETHUSD",
+                "product_symbol":"SHIBUSD",
                 "size": size,
                 "side": side,
                 "order_type": "market_order",
@@ -261,8 +235,8 @@ class DeltaExchangeRFGaizy:
         # finally working
         try:
             payload = {
-                "product_symbol":"ETHUSD",
-                "limit_price": "2600",
+                "product_symbol":"SHIBUSD",
+                "limit_price": "100000",
                 "size": size,
                 "side": side,
                 "order_type": "limit_order",
@@ -293,10 +267,10 @@ class DeltaExchangeRFGaizy:
         except Exception as e:
             print(f"Error in place_order_limit function: {e}")
     
-    def place_order_bracket_limit(self,limit_price="2560",stop_price="2550",stop_limit_price="2540",take_profit_price="2570",take_profit_limit_price="2560",side="buy",size=1):
+    def place_order_bracket_limit(self,limit_price="100000",stop_price="99000",stop_limit_price="98000",take_profit_price="102000",take_profit_limit_price="101000",side="buy",size=1):
         try:
             payload = {
-            "product_symbol": "ETHUSD",
+            "product_symbol": "SHIBUSD",
             "limit_price":limit_price,
             "size":size,
             "side":side,
@@ -382,9 +356,9 @@ class DeltaExchangeRFGaizy:
                         self.flag = -1
 
                 if self.flag == 1:
-                    print(f"self.flag is {self.flag} in line 338")
+                    print(f"self.flag is {self.flag}")
                 elif self.flag == -1:
-                    print(f"self.flag is {self.flag} in line 341")
+                    print(f"self.flag is {self.flag}")
                     self.leverage_check()
                 else:
                     print("Order is still open")
@@ -396,16 +370,50 @@ class DeltaExchangeRFGaizy:
         last = self.df.iloc[-1]
         return last['close']
     
-    def get_active_positions_status(self):
-        """Get active positions from Delta Exchange for ETHUSD (product_id: 1699)"""
+    def get_active_orders(self):
+        """Get active orders from Delta Exchange"""
+        try:
+            method = "GET"
+            path = "/v2/orders"
+            url = self.base_url + path
+            timestamp = str(int(time.time()))
+            query_string = ''
+            signature_data = method + timestamp + path + query_string
+            signature = self.generate_signature(self.api_secret, signature_data)
+            
+            headers = {
+                "api-key": self.api_key,
+                "timestamp": timestamp,
+                "signature": signature,
+                "User-Agent": "python-rest-client"
+            }
+            
+            response = requests.get(url, headers=headers)
+            orders_data = response.json()
+            
+            # Print the full response for debugging
+            print("Active Orders Response:", orders_data)
+            
+            # Return the orders data
+            if 'result' in orders_data:
+                return orders_data['result']
+            else:
+                return orders_data
+                
+        except Exception as e:
+            print(f"Error getting active orders: {e}")
+            return None
+        
+    def get_active_positions_SHIBA(self):
+        """Get active positions from Delta Exchange for SHIBUSD (product_id: 92570)"""
         try:
             method = "GET"
             path = "/v2/positions"
             url = self.base_url + path
             timestamp = str(int(time.time()))
             
-            # Build query parameters for BTCUSD
-            params = {'product_id': '1699'}
+            # Build query parameters for SHIBUSD
+            params = {'product_id': '92570'}
             
             # Build query string
             query_string = '&'.join([f"{k}={v}" for k, v in params.items()])
@@ -428,6 +436,49 @@ class DeltaExchangeRFGaizy:
             
             # Print the full response for debugging
             print("Active Positions Response:", positions_data)
+            print(f"Current size of positions is: {positions_data['result']['size']}")
+
+            if int(abs(positions_data['result']['size']))>0:
+                return False
+            else:
+                return True
+                
+        except Exception as e:
+            print(f"Error getting active positions: {e}")
+            return None
+        
+    def get_active_positions(self):
+        """Get active positions from Delta Exchange for ETHUSD (product_id: 1699)"""
+        try:
+            method = "GET"
+            path = "/v2/positions"
+            url = self.base_url + path
+            timestamp = str(int(time.time()))
+            
+            # Build query parameters for ETHUSD
+            params = {'product_id': '1699'}
+            
+            # Build query string
+            query_string = '&'.join([f"{k}={v}" for k, v in params.items()])
+            
+            # Create signature data - ADD '?' before query_string for GET requests with params
+            signature_data = method + timestamp + path + '?' + query_string
+            signature = self.generate_signature(self.api_secret, signature_data)
+            
+            headers = {
+                "api-key": self.api_key,
+                "timestamp": timestamp,
+                "signature": signature,
+                "User-Agent": "python-rest-client"
+            }
+            
+            # Make the request with query parameters
+            response = requests.get(url, headers=headers, params=params)
+            
+            positions_data = response.json()
+            
+            # Print the full response for debugging
+            # print("Active Positions Response:", positions_data)
             print(f"Current size of positions is: {positions_data['result']['size']}")
 
             if int(abs(positions_data['result']['size']))>0:
@@ -474,14 +525,14 @@ class DeltaExchangeRFGaizy:
                     self.account_balance = float(self.get_usd_balance())
                     self.base_price = float(self.get_market_price()) * self.min_lot
                     self.margin = self.account_balance/self.base_price
-                    self.base = self.margin/2 # use something like kelly's criteria
+                    self.base = self.margin*self.leverage_multiplier/2 # use something like kelly's criteria
                     print(f"You can trade for base_size {int(self.margin)} without using any leverage and {int(self.margin*self.base_leverage)} with base leverage")
             else:
-                self.df = pd.read_csv(r"C:\Users\vaibh\OneDrive\Desktop\delta\data\ETHUSD_Final_main.csv")
+                self.df = pd.read_csv(r"C:\Users\vaibh\OneDrive\Desktop\delta\SHIBUSD_Final.csv")
                 self.account_balance = float(self.get_usd_balance())
                 self.base_price = float(self.get_market_price()) * self.min_lot
                 self.margin = self.account_balance/self.base_price
-                self.base = self.margin/2  # use something like the kelly's criteria's part
+                self.base = self.margin*self.base_leverage/2  # use something like the kelly's criteria's part
                 print(f"You can trade for base_size {int(self.margin)} without using any leverage and {int(self.margin*self.base_leverage)} with base leverage")
         except Exception as e:
             print(f"Exception in get_base_margin_size")
@@ -526,12 +577,12 @@ class DeltaExchangeRFGaizy:
             current_time = self.get_current_datetime()
             print(f"Fetching data at: {current_time}")
             
-            self.df = self.broker.get_ticker_data(symbol='ETHUSD') # current time / other things need to be accounted for
+            self.df = self.broker.get_ticker_data(symbol='SHIBUSD') # current time / other things need to be accounted for
             
             self.df['Timestamp'] = pd.to_datetime(self.df['time'],unit='s')
             self.df.sort_values(by='Timestamp',ascending=False,inplace=True)
             self.df = self.df.iloc[::-1].reset_index(drop=True)
-            self.df.to_csv("data/ETHUSD_Indicator_main.csv")
+            self.df.to_csv("SHIBUSD_Indicator.csv")
                 
         except Exception as e:
             print(f"Error occured in fetching the data : {e}")
@@ -555,7 +606,7 @@ class DeltaExchangeRFGaizy:
 
         Args:
             value (int or str): Leverage to set (e.g., 10).
-            product_id (int or str): The Delta Exchange product ID (e.g., 27 for ETHUSD).
+            product_id (int or str): The Delta Exchange product ID (e.g., 92570 for SHIBUSD).
         """
         import time
         import json
@@ -662,138 +713,35 @@ class DeltaExchangeRFGaizy:
             if self.heikan_choice == 1:
                 self.calculate_heiken_ashi()
             self.df = self.rf.run_filter(self.df)
-            # self.df['gaizy_color'] = self.Grsi.calculate_signals(df=self.df)
-            self.df['rsi'],self.df['rsi_buy'],self.df['rsi_sell'] = self.bsrsi.generate_signals(self.df['Close'])
             self.df.rename(columns={'Close':'close','Open':'open','High':'high','Low':'low','Volume':'volume'},inplace=True)
-            self.df['gaizy_color'] = self.Grsi.calculate_gainzy_colors(df=self.df)
-            # self.df,_ = calculate_inside_bar_boxes(self.df)
             self.df = calculate_inside_ib_box(self.df)
             columns_to_drop = [
                 'RF_UpperBand', 'RF_LowerBand', 'RF_Filter', 'RF_Trend',
-                'IsIB', 'BoxHigh', 'BoxLow', 'BarColor','rsi'
+                'IsIB', 'BoxHigh', 'BoxLow', 'BarColor'
             ]
             self.df = self.df.drop(columns=columns_to_drop)
             # print(self.df)
             print(self.df.tail(1))
-            # self.df.to_csv('ETHUSD_Indicator.csv')
-            self.df.to_csv("data/ETHUSD_Indicator_main.csv")
+            self.df.to_csv('SHIBUSD_Indicator.csv')
         except Exception as e:
             print(f"Error occured in calculating the signal : {e}")
-    
-    def get_current_position_size(self):
-        """Get current position size (modify from existing get_active_positions)"""
-        try:
-            method = "GET"
-            path = "/v2/positions"
-            url = self.base_url + path
-            timestamp = str(int(time.time()))
-            
-            params = {'product_id': '1699'}
-            query_string = '&'.join([f"{k}={v}" for k, v in params.items()])
-            signature_data = method + timestamp + path + '?' + query_string
-            signature = self.generate_signature(self.api_secret, signature_data)
-            
-            headers = {
-                "api-key": self.api_key,
-                "timestamp": timestamp,
-                "signature": signature,
-                "User-Agent": "python-rest-client"
-            }
-            
-            response = requests.get(url, headers=headers, params=params)
-            positions_data = response.json()
-            
-            return int(abs(float(positions_data['result']['size'])))
-            
-        except Exception as e:
-            print(f"Error getting position size: {e}")
-            return 0
-
-    def check_last_trade_result(self):
-        """Check if last trade was win or loss based on current price vs TP/SL"""
-        try:
-            if self.last_tp_price is None or self.last_sl_price is None or self.trade_entry_price is None:
-                print("Missing price data for win/loss calculation")
-                return
-                
-            current_price = self.get_market_price()
-            
-            # Calculate distances to TP and SL
-            distance_to_tp = abs(current_price - self.last_tp_price)
-            distance_to_sl = abs(current_price - self.last_sl_price)
-            
-            # Determine win/loss based on which is closer
-            if distance_to_tp < distance_to_sl:
-                self.last_trade_status = 1  # Win
-                print(f"Last trade was a WIN. Current price {current_price} closer to TP {self.last_tp_price}")
-            else:
-                self.last_trade_status = 0  # Loss
-                print(f"Last trade was a LOSS. Current price {current_price} closer to SL {self.last_sl_price}")
-                
-        except Exception as e:
-            print(f"Error in check_last_trade_result: {e}")
-
-    def adjust_leverage_based_on_result(self):
-        """Adjust leverage based on last trade result"""
-        try:
-            if self.last_trade_status == 1:  # Win
-                print("Last trade was profitable - keeping same leverage")
-                # Keep current leverage unchanged
-            elif self.last_trade_status == 0:  # Loss
-                print("Last trade was loss - doubling leverage")
-                if self.base_leverage < self.max_leverage:
-                    self.base_leverage = self.base_leverage * 2
-                    print(f"Leverage increased to {self.base_leverage}")
-                else:
-                    print(f"Max leverage {self.max_leverage} reached, resetting to base")
-                    self.base_leverage = 2  # Reset to base leverage
-                    
-        except Exception as e:
-            print(f"Error in adjust_leverage_based_on_result: {e}")
 
     def execute_signals(self):
         try:
-            # Get current position size (you'll need to modify get_active_positions to return size)
-            current_position_size = self.get_current_position_size()  # New method needed
-            
-            # Detect if position just closed (was non-zero, now zero)
-            if self.previous_position_size != 0 and current_position_size == 0:
-                print("Position closed - checking win/loss status")
-                self.check_last_trade_result()
-                self.adjust_leverage_based_on_result()
-            
-            # Update previous position size for next iteration
-            self.previous_position_size = current_position_size
-            
-            # Only proceed with new trades if no active position
-            if current_position_size != 0:
-                print("Active position exists, skipping new signals")
-                return
-                
-            self.df = self.df.tail(200)
+            self.df = self.df.tail(600)
             self.df['Signal_Final'] = 0
 
-            # Initialize signal tracking variables
+            # Initialize RF signal tracking variables
             last_rf_buy_signal = False
             last_rf_sell_signal = False
             rf_signal_candle = -1
             rf_used = False
 
-            # Initialize Arrow signal tracking variables (added from second code)
+            # Initialize Arrow signal tracking variables
             last_green_arrow = False
             last_red_arrow = False
             arrow_signal_candle = -1
             arrow_used = False
-
-            pending_rsi_buy = False
-            pending_rsi_sell = False
-            rsi_signal_candle = -1
-
-            # Track used RSI_Gaizy lines to ensure only one trade per color line
-            used_gaizy_green = False
-            used_gaizy_red = False
-            used_gaizy_pink = False
-            used_gaizy_black = False  # Added this line
 
             for i in range(len(self.df)):
                 row = self.df.iloc[i]
@@ -806,7 +754,7 @@ class DeltaExchangeRFGaizy:
                 new_rf_buy = current_rf_buy and (prev_row is None or prev_row['RF_BuySignal'] != 1)
                 new_rf_sell = current_rf_sell and (prev_row is None or prev_row['RF_SellSignal'] != 1)
 
-                # Detect new Arrow signals (added from second code)
+                # Detect new Arrow signals
                 new_green_arrow = row['GreenArrow'] == 1 and (prev_row is None or prev_row['GreenArrow'] != 1)
                 new_red_arrow = row['RedArrow'] == 1 and (prev_row is None or prev_row['RedArrow'] != 1)
 
@@ -822,7 +770,7 @@ class DeltaExchangeRFGaizy:
                     rf_signal_candle = i
                     rf_used = False
 
-                # Update Arrow signal tracking (added from second code)
+                # Update Arrow signal tracking
                 if new_green_arrow:
                     last_green_arrow = True
                     last_red_arrow = False
@@ -835,179 +783,86 @@ class DeltaExchangeRFGaizy:
                     arrow_used = False
 
                 # Reset RF signals if they're older than 1 candle and not used
-                if (i - rf_signal_candle) > 1 and (last_rf_buy_signal or last_rf_sell_signal):
+                elif (i - rf_signal_candle) > 1 and (last_rf_buy_signal or last_rf_sell_signal):
                     last_rf_buy_signal = False
                     last_rf_sell_signal = False
                     rf_used = False
 
                 # Reset Arrow signals if they're older than 1 candle and not used
-                if (i - arrow_signal_candle) > 1 and (last_green_arrow or last_red_arrow):
+                elif (i - arrow_signal_candle) > 1 and (last_green_arrow or last_red_arrow):
                     last_green_arrow = False
                     last_red_arrow = False
                     arrow_used = False
 
-                # Detect RSI_Gaizy color changes
-                current_gaizy = row['gaizy_color']
-                gaizy_changed = prev_row is not None and prev_row['gaizy_color'] != current_gaizy
-
-                # Reset color usage flags when new color appears
-                if gaizy_changed:
-                    if current_gaizy in ['bright_green', 'dark_green']:
-                        used_gaizy_green = False
-                    elif current_gaizy in ['red']:
-                        used_gaizy_red = False
-                    elif current_gaizy in ['pink']:
-                        used_gaizy_pink = False
-                    elif current_gaizy == 'black':  # Added this condition
-                        used_gaizy_black = False
-
                 signal = 0  # Default
 
-                # === PRIORITY 1: Range Filter (RF) + IB_Box Confirmation ===
-                # This gets highest priority to ensure it's fulfilled
+                # === Range Filter (RF) + IB_Box Confirmation ===
+                # Allow signals within 1 candle of each other in BOTH directions
                 
                 # Scenario A: RF signal first, then Arrow signal
                 # Condition A1: RF and Arrow signals in same candle
                 if new_rf_buy and row['GreenArrow'] == 1 and not rf_used:
-                    signal = 2  # RF + IB_Box buy signal
+                    signal = 1
                     rf_used = True
                     last_rf_buy_signal = False
-                    # print(f"RF + IB_Box BUY signal triggered at candle {i} (same candle)")
                 elif new_rf_sell and row['RedArrow'] == 1 and not rf_used:
-                    signal = -2  # RF + IB_Box sell signal
+                    signal = -1
                     rf_used = True
                     last_rf_sell_signal = False
-                    # print(f"RF + IB_Box SELL signal triggered at candle {i} (same candle)")
                 
                 # Condition A2: RF signal, then Arrow signal in immediate next candle
                 elif last_rf_buy_signal and not rf_used and row['GreenArrow'] == 1 and (i - rf_signal_candle) == 1:
-                    signal = 2  # RF + IB_Box buy signal
+                    signal = 1
                     rf_used = True
                     last_rf_buy_signal = False
-                    # print(f"RF + IB_Box BUY signal triggered at candle {i} (RF at {rf_signal_candle}, Arrow at {i})")
                 elif last_rf_sell_signal and not rf_used and row['RedArrow'] == 1 and (i - rf_signal_candle) == 1:
-                    signal = -2  # RF + IB_Box sell signal
+                    signal = -1
                     rf_used = True
                     last_rf_sell_signal = False
-                    # print(f"RF + IB_Box SELL signal triggered at candle {i} (RF at {rf_signal_candle}, Arrow at {i})")
 
                 # Scenario B: Arrow signal first, then RF signal
                 # Condition B1: Arrow signal, then RF signal in immediate next candle
                 elif last_green_arrow and not arrow_used and new_rf_buy and (i - arrow_signal_candle) == 1:
-                    signal = 2  # RF + IB_Box buy signal
+                    signal = 1
                     arrow_used = True
                     last_green_arrow = False
-                    # print(f"RF + IB_Box BUY signal triggered at candle {i} (Arrow at {arrow_signal_candle}, RF at {i})")
                 elif last_red_arrow and not arrow_used and new_rf_sell and (i - arrow_signal_candle) == 1:
-                    signal = -2  # RF + IB_Box sell signal
+                    signal = -1
                     arrow_used = True
                     last_red_arrow = False
-                    # print(f"RF + IB_Box SELL signal triggered at candle {i} (Arrow at {arrow_signal_candle}, RF at {i})")
-
-                # === PRIORITY 2: RSI_Gaizy Integration + IB_box ===
-                # Only execute if no RF + IB_Box signal was triggered
-                elif signal == 0:
-                    # Each RSI_Gaizy color line can trigger only one trade
-                    if current_gaizy in ['bright_green', 'dark_green'] and not used_gaizy_green:
-                        # Green line → Triggers Green Box trade only
-                        if row['GreenArrow'] == 1:
-                            signal = 1
-                            used_gaizy_green = True
-                            # print(f"RSI_Gaizy GREEN + IB_Box signal triggered at candle {i}")
-                    elif current_gaizy == 'red' and not used_gaizy_red:
-                        # Red line → Triggers Red Box trade only
-                        if row['RedArrow'] == 1:
-                            signal = -1
-                            used_gaizy_red = True
-                            # print(f"RSI_Gaizy RED + IB_Box signal triggered at candle {i}")
-                    elif current_gaizy == 'pink' and not used_gaizy_pink:
-                        # Pink strong sell → Triggers Red Box trade only
-                        if row['RedArrow'] == 1:
-                            signal = -1
-                            used_gaizy_pink = True
-                            # print(f"RSI_Gaizy PINK + IB_Box signal triggered at candle {i}")
-                    elif current_gaizy == 'black' and not used_gaizy_black:  # Added usage check
-                        # Black signal → Take trade based on IB box
-                        if row['GreenArrow'] == 1:
-                            signal = 1
-                            used_gaizy_black = True  # Mark as used
-                            # print(f"RSI_Gaizy BLACK + Green IB_Box signal triggered at candle {i}")
-                        elif row['RedArrow'] == 1:
-                            signal = -1
-                            used_gaizy_black = True  # Mark as used
-                            # print(f"RSI_Gaizy BLACK + Red IB_Box signal triggered at candle {i}")
-
-                # Mark RSI_Gaizy colors as used when ANY signal is triggered (including RF + IB_Box)
-                if signal != 0:
-                    if current_gaizy in ['bright_green', 'dark_green']:
-                        used_gaizy_green = True
-                    elif current_gaizy == 'red':
-                        used_gaizy_red = True
-                    elif current_gaizy == 'pink':
-                        used_gaizy_pink = True
-                    elif current_gaizy == 'black':
-                        used_gaizy_black = True
-
-                # === PRIORITY 3: RSI Buy/sell + RF Logic ===
-                # Only execute if no higher priority signal was triggered
-                if signal == 0:
-                    # Track RSI signals
-                    if row['rsi_buy'] == 1:
-                        pending_rsi_buy = True
-                        rsi_signal_candle = i
-                    elif row['rsi_sell'] == 1:
-                        pending_rsi_sell = True
-                        rsi_signal_candle = i
-
-                    # Check for RF confirmation after RSI signal
-                    if pending_rsi_buy and current_rf_buy and (i - rsi_signal_candle) <= 1 and not rf_used:
-                        signal = 3
-                        pending_rsi_buy = False
-                        rf_used = True
-                        last_rf_buy_signal = False
-                        # print(f"RSI + RF BUY signal triggered at candle {i}")
-                    elif pending_rsi_sell and current_rf_sell and (i - rsi_signal_candle) <= 1 and not rf_used:
-                        signal = -3
-                        pending_rsi_sell = False
-                        rf_used = True
-                        last_rf_sell_signal = False
-                        # print(f"RSI + RF SELL signal triggered at candle {i}")
-
-                    # Reset pending RSI signals if too much time has passed (more than 2 candles)
-                    if pending_rsi_buy and (i - rsi_signal_candle) > 2:
-                        pending_rsi_buy = False
-                    if pending_rsi_sell and (i - rsi_signal_candle) > 2:
-                        pending_rsi_sell = False
 
                 # Assign the final signal
                 self.df.iat[i, self.df.columns.get_loc('Signal_Final')] = signal
 
-            # self.df.to_csv('ETHUSD_Final.csv')
-            self.df.to_csv("data/ETHUSD_Final_main.csv")
+            self.df.to_csv('SHIBUSD_Final.csv')
 
             # === Execute Latest Signal ===
+            # last_candle = self.df.iloc[-1]
             last_candle = self.df.iloc[-1]
             last_signal = last_candle['Signal_Final']
             print(f"the current order id is {self.current_order_id}")
             print(f"the last signal is {last_signal}")
 
-            if last_signal != 0:
+            if last_signal != 0 and self.get_active_positions_bitcoin():
                 print(f"a new order would be placed since last signal is {last_signal}")
+                print(f"active position status is {self.get_active_positions_bitcoin()}")
+                import time
+                time.sleep(10)
                 current_price = float(last_candle['close'])
                 self.last_price = current_price
-                self.trade_entry_price = current_price  # Store entry price for win/loss calculation
                 side = "buy" if last_signal > 0 else "sell"
 
-                sl_price = self.calculate_stoploss(current_price, side, self.df)
+                sl_price = self.calculate_stoploss(current_price, side)
                 tp_price = self.calculate_takeprofit(current_price, side)
+
                 self.last_sl_price = sl_price
                 self.last_tp_price = tp_price
 
                 if sl_price is not None and tp_price is not None:
                     stop_limit = sl_price + 10 if side == "buy" else sl_price + 10
                     tp_limit = tp_price - 10 if side == "buy" else tp_price + 10
-                    self.set_leverage_delta(value=self.base_leverage,product_id="1699")
-                    # self.leverage_check()
+                    self.set_leverage_delta(value=self.base_leverage,product_id="92570")
+                    self.leverage_check()
                     self.get_base_margin_size() # updates the self.base size
                     self.place_order_market(side=side, size=int(self.base))
                     # import time
@@ -1028,32 +883,39 @@ class DeltaExchangeRFGaizy:
             import traceback
             traceback.print_exc()
 
+    def test(self):
+        try:
+            self.connect()
+            # self.get_active_orders()
+            # self.get_active_positions_bitcoin()
+            self.place_order_market(side="buy",size=1)
+            exit(0)
+        except Exception as e:
+            print(f"Error in test run : {e}")
+            import traceback
+            traceback.print_exc()
+
     def run(self):
         try:
-            if self.get_active_positions_status():
-                print(f"Starting bot at: {self.get_current_datetime()}")
-                self.connect()
+            print(f"Starting bot at: {self.get_current_datetime()}")
+            self.connect()
+            # if self.get_active_positions(): # true means size 0 no position
+            if self.get_active_positions_SHIBA():
+                print(f"Current status of get_active_positions is {self.get_active_positions_SHIBA()}")
                 self.fetch_data()
                 self.calculate_signals()
                 self.execute_signals()
+                import time
+                time.sleep(5)
+            else:
+                print(f"Status of the position being closed is {self.get_active_positions_SHIBA()}")
                 import time
                 time.sleep(10)
 
         except Exception as e:
             print(f"Error occured in run : {e}")
-    
-    def test(self):
-        try:
-            import time
-            time.sleep(5)
-            self.connect()
-            # self.cancel_order(order_id=640925488,product_id=1699)
-            self.cancel_all_orders(product_id=1699)
-            # self.get_usd_balance()
-            # self.get_base_margin_size()
-            pass
-        except Exception as e:
-            print(f"Exception in test run {e}")
+            import traceback
+            traceback.print_exc()
 
 if __name__ == "__main__":
     api_key = "MZvQgXnmlxSqWnfJRRcvBymh6FFqs5"
@@ -1063,5 +925,6 @@ if __name__ == "__main__":
     while True:
         try:
             Debot.run()
+            # Debot.test()
         except Exception as e:
             print(f"Error in run : {e}")
