@@ -27,7 +27,7 @@ class DeltaExchangeRFGaizy:
         self.ib = None
         self.Grsi = RSIGainzy()
         self.current_order_id = None
-        self.base_leverage = 50
+        self.base_leverage = 20
         self.leverage_multiplier = 1
         self.max_leverage = 5
         self.last_price = None
@@ -36,6 +36,7 @@ class DeltaExchangeRFGaizy:
         self.account_balance = None
         self.min_lot = 0.01
         self.heikan_choice = 1
+        self.cooldown_duration = 600
 
     def generate_signature(self,secret,message):
         try:
@@ -65,10 +66,16 @@ class DeltaExchangeRFGaizy:
         try:
             if side == "buy":
                 # sl = entry_price * 0.99
-                sl = entry_price * 0.995
+                # sl = entry_price - 12
+                last_candle = self.df.iloc[-1]
+                difference = last_candle['atr']*1
+                sl = entry_price-difference
             else:
                 # sl = entry_price * 1.01
-                sl = entry_price * 1.005
+                # sl = entry_price + 12
+                last_candle = self.df.iloc[-1]
+                difference = last_candle['atr']*1
+                sl = entry_price+difference
             print(f"Calculated stop loss for {side}: {sl}")
             return sl
         
@@ -79,11 +86,17 @@ class DeltaExchangeRFGaizy:
         """Calculate take profit based on risk-reward ratio"""
         try:
             if side == "buy":
-                # tp = entry_price * 1.01  # 2% profit
-                tp = entry_price * 1.005
+                # tp = entry_price * 1.01 
+                # tp = entry_price + 21
+                last_candle = self.df.iloc[-1]
+                difference = last_candle['atr']*1.5
+                tp = entry_price + difference
             else:  # sell
-                # tp = entry_price * 0.99  # 2% profit
-                tp = entry_price * 0.995
+                # tp = entry_price * 0.99
+                # tp = entry_price - 21
+                last_candle = self.df.iloc[-1]
+                difference = last_candle['atr']*1.5
+                tp = entry_price - difference
             
             print(f"Calculated take profit for {side}: {tp}")
             return tp
@@ -95,9 +108,9 @@ class DeltaExchangeRFGaizy:
     def leverage_check(self):
         if self.base_leverage<self.max_leverage:
             # self.base_leverage = self.base_leverage * self.leverage_multiplier
-            self.base_leverage = 50
+            self.base_leverage = 20
         else:
-            self.base_leverage = 50
+            self.base_leverage = 20
 
     # working
     import time
@@ -312,6 +325,74 @@ class DeltaExchangeRFGaizy:
 
         except Exception as e:
             print(f"Error in place_order_bracket_limit function: {e}")
+    
+    def update_bracket_order(self, order_id, product_symbol="AVAXUSD", 
+                        bracket_stop_loss_price=None, bracket_stop_loss_limit_price=None,
+                        bracket_take_profit_price=None, bracket_take_profit_limit_price=None,
+                        bracket_trail_amount=None, bracket_stop_trigger_method="last_traded_price"):
+        """
+        Update bracket order parameters for an existing order
+        
+        Args:
+            order_id (int): Order ID for which bracket params are being updated
+            product_symbol (str): Product symbol (default: "AVAXUSD")
+            bracket_stop_loss_price (str, optional): Stop loss trigger price
+            bracket_stop_loss_limit_price (str, optional): Stop loss limit price
+            bracket_take_profit_price (str, optional): Take profit trigger price
+            bracket_take_profit_limit_price (str, optional): Take profit limit price
+            bracket_trail_amount (str, optional): Trail amount for bracket order
+            bracket_stop_trigger_method (str): Stop order trigger method (default: "last_traded_price")
+        """
+        try:
+            # Build payload with only provided parameters
+            payload = {
+                "id": order_id,
+                "product_symbol": product_symbol,
+                "bracket_stop_trigger_method": bracket_stop_trigger_method
+            }
+            
+            # Add optional parameters only if they are provided
+            if bracket_stop_loss_price is not None:
+                payload["bracket_stop_loss_price"] = str(bracket_stop_loss_price)
+            
+            if bracket_stop_loss_limit_price is not None:
+                payload["bracket_stop_loss_limit_price"] = str(bracket_stop_loss_limit_price)
+            
+            if bracket_take_profit_price is not None:
+                payload["bracket_take_profit_price"] = str(bracket_take_profit_price)
+            
+            if bracket_take_profit_limit_price is not None:
+                payload["bracket_take_profit_limit_price"] = str(bracket_take_profit_limit_price)
+            
+            if bracket_trail_amount is not None:
+                payload["bracket_trail_amount"] = str(bracket_trail_amount)
+
+            method = 'PUT'
+            path = '/v2/orders/bracket'
+            url = self.base_url + path
+            timestamp = str(int(time.time()))
+            query_string = ''
+            payload_json = json.dumps(payload, separators=(',', ':'))  # compact format
+            signature_data = method + timestamp + path + query_string + payload_json
+            signature = self.generate_signature(self.api_secret, signature_data)
+
+            headers = {
+                'api-key': self.api_key,
+                'timestamp': timestamp,
+                'signature': signature,
+                'User-Agent': 'python-rest-client',
+                'Content-Type': 'application/json'
+            }
+
+            response = requests.put(url, headers=headers, data=payload_json)
+            print(f"Update Bracket Response Code: {response.status_code}")
+            print(f"Update Bracket Response Body: {response.json()}")
+            
+            return response.json()
+
+        except Exception as e:
+            print(f"Error in update_bracket_order function: {e}")
+            return None
 
     def order_status(self, order_id):
         try:
@@ -482,15 +563,17 @@ class DeltaExchangeRFGaizy:
                     self.account_balance = float(self.get_usd_balance())
                     self.base_price = float(self.get_market_price()) * self.min_lot
                     self.margin = self.account_balance/self.base_price
-                    self.base = self.margin*self.leverage_multiplier/2 # use something like kelly's criteria
-                    print(f"You can trade for base_size {int(self.margin)} without using any leverage and {int(self.margin*self.base_leverage)} with base leverage")
+                    self.base = self.margin*self.base_leverage/2 # use something like kelly's criteria
+                    # print(f"You can trade for base_size {int(self.margin)} without using any leverage and {int(self.margin*self.base_leverage)} with base leverage")
+                    print(f"self.account balance is :{self.account_balance},self.base_price is {self.base_price},self.margin is {self.margin},base amount used for trade would be {self.base} because leverage is {self.base_leverage}")
             else:
                 self.df = pd.read_csv(r"C:\Users\vaibh\OneDrive\Desktop\delta\ETHUSD_Final.csv")
                 self.account_balance = float(self.get_usd_balance())
                 self.base_price = float(self.get_market_price()) * self.min_lot
                 self.margin = self.account_balance/self.base_price
                 self.base = self.margin*self.base_leverage/2  # use something like the kelly's criteria's part
-                print(f"You can trade for base_size {int(self.margin)} without using any leverage and {int(self.margin*self.base_leverage)} with base leverage")
+                print(f"self.account balance is :{self.account_balance},self.base_price is {self.base_price},self.margin is {self.margin},base amount used for trade would be {self.base} because leverage is {self.base_leverage}")
+                # print(f"You can trade for base_size {int(self.margin)} without using any leverage and {int(self.margin*self.base_leverage)} with base leverage")
         except Exception as e:
             print(f"Exception in get_base_margin_size")
 
@@ -668,7 +751,23 @@ class DeltaExchangeRFGaizy:
             self.df.rename(columns={'close':'Close','open':'Open','high':'High','low':'Low','volume':'Volume'},inplace=True)
             if self.heikan_choice == 1:
                 self.calculate_heiken_ashi()
+
             self.df = self.rf.run_filter(self.df)
+            atr_period = 14  # configurable
+            high = self.df['High']
+            low = self.df['Low']
+            close = self.df['Close']
+
+            # True Range components
+            tr1 = high - low
+            tr2 = (high - close.shift(1)).abs()
+            tr3 = (low - close.shift(1)).abs()
+
+            # True Range (TR) is the maximum of the 3
+            tr = pd.DataFrame({'tr1': tr1, 'tr2': tr2, 'tr3': tr3}).max(axis=1)
+            # Average True Range (ATR)
+            self.df['atr'] = tr.rolling(window=atr_period, min_periods=1).mean()
+
             self.df.rename(columns={'Close':'close','Open':'open','High':'high','Low':'low','Volume':'volume'},inplace=True)
             self.df = calculate_inside_ib_box(self.df)
             columns_to_drop = [
@@ -679,11 +778,6 @@ class DeltaExchangeRFGaizy:
             # print(self.df)
             print(self.df.tail(1))
             self.df.to_csv('ETHUSD_Indicator.csv')
-        except Exception as e:
-            print(f"Error occured in calculating the signal : {e}")
-
-    def execute_signals(self):
-        try:
             self.df = self.df.tail(2000)
             self.df['Signal_Final'] = 0
 
@@ -791,6 +885,11 @@ class DeltaExchangeRFGaizy:
                 self.df.iat[i, self.df.columns.get_loc('Signal_Final')] = signal
 
             self.df.to_csv('ETHUSD_Final.csv')
+        except Exception as e:
+            print(f"Error occured in calculating the signal : {e}")
+
+    def execute_signals(self):
+        try:
 
             # === Execute Latest Signal ===
             # last_candle = self.df.iloc[-1]
@@ -802,8 +901,8 @@ class DeltaExchangeRFGaizy:
             if last_signal != 0 and self.get_active_positions():
                 print(f"a new order would be placed since last signal is {last_signal}")
                 print(f"active position status is {self.get_active_positions()}")
-                import time
-                time.sleep(10)
+                # import time
+                # time.sleep(10)
                 current_price = float(last_candle['close'])
                 self.last_price = current_price
                 side = "buy" if last_signal > 0 else "sell"
@@ -853,20 +952,28 @@ class DeltaExchangeRFGaizy:
 
     def run(self):
         try:
-            print(f"Starting bot at: {self.get_current_datetime()}")
-            self.connect()
-            self.set_leverage_delta(value=self.base_leverage,product_id="3136")
-            if self.get_active_positions(): # true means size 0 no position
-                print(f"Current status of get_active_positions is {self.get_active_positions()}")
-                self.fetch_data()
-                self.calculate_signals()
-                self.execute_signals()
-                import time
-                time.sleep(5)
-            else:
-                print(f"Status of the position being closed is {self.get_active_positions()}")
-                import time
-                time.sleep(10)
+                print(f"Starting bot at: {self.get_current_datetime()}")
+                self.connect()
+                self.set_leverage_delta(value=self.base_leverage,product_id="3136")
+                if self.get_active_positions(): # true means size 0 no position
+                    print(f"Current status of get_active_positions is {self.get_active_positions()}")
+                    self.fetch_data()
+                    self.calculate_signals()
+                    import time
+                    last_candle = self.df.iloc[-1]
+                    last_signal = last_candle['Signal_Final']
+                    if last_signal != 0:
+                        self.execute_signals()
+                        print(f'Signal executed. Sleeping for {self.cooldown_duration}')
+                        time.sleep(self.cooldown_duration)
+                    else:
+                        time.sleep(5)
+                    import time
+                    time.sleep(5)
+                else:
+                    print(f"Status of the position being closed is {self.get_active_positions()}")
+                    import time
+                    time.sleep(10)
 
         except Exception as e:
             print(f"Error occured in run : {e}")

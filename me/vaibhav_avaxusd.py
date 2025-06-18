@@ -27,15 +27,16 @@ class DeltaExchangeRFGaizy:
         self.ib = None
         self.Grsi = RSIGainzy()
         self.current_order_id = None
-        self.base_leverage = 20
+        self.base_leverage = 50
         self.leverage_multiplier = 1
-        self.max_leverage = 10
+        self.max_leverage = 50
         self.last_price = None
         self.flag = 0
         self.base = 1
         self.account_balance = None
-        self.min_lot = 100000
+        self.min_lot = 1
         self.heikan_choice = 1
+        self.cooldown_duration = 1800
 
     def generate_signature(self,secret,message):
         try:
@@ -65,10 +66,10 @@ class DeltaExchangeRFGaizy:
         try:
             if side == "buy":
                 # sl = entry_price * 0.99
-                sl = entry_price * 0.995
+                sl = entry_price - 0.1
             else:
                 # sl = entry_price * 1.01
-                sl = entry_price * 1.005
+                sl = entry_price + 0.1
             print(f"Calculated stop loss for {side}: {sl}")
             return sl
         
@@ -80,10 +81,10 @@ class DeltaExchangeRFGaizy:
         try:
             if side == "buy":
                 # tp = entry_price * 1.01  # 2% profit
-                tp = entry_price * 1.01
+                tp = entry_price + 0.175
             else:  # sell
                 # tp = entry_price * 0.99  # 2% profit
-                tp = entry_price * 0.99
+                tp = entry_price - 0.175
             
             print(f"Calculated take profit for {side}: {tp}")
             return tp
@@ -95,9 +96,9 @@ class DeltaExchangeRFGaizy:
     def leverage_check(self):
         if self.base_leverage<self.max_leverage:
             # self.base_leverage = self.base_leverage * self.leverage_multiplier
-            self.base_leverage = 10
+            self.base_leverage = 50
         else:
-            self.base_leverage = 10
+            self.base_leverage = 50
 
     # working
     import time
@@ -198,7 +199,7 @@ class DeltaExchangeRFGaizy:
         # finally working
         try:
             payload = {
-                "product_symbol":"SHIBUSD",
+                "product_symbol":"AVAXUSD",
                 "size": size,
                 "side": side,
                 "order_type": "market_order",
@@ -235,7 +236,7 @@ class DeltaExchangeRFGaizy:
         # finally working
         try:
             payload = {
-                "product_symbol":"SHIBUSD",
+                "product_symbol":"AVAXUSD",
                 "limit_price": "100000",
                 "size": size,
                 "side": side,
@@ -270,7 +271,7 @@ class DeltaExchangeRFGaizy:
     def place_order_bracket_limit(self,limit_price="100000",stop_price="99000",stop_limit_price="98000",take_profit_price="102000",take_profit_limit_price="101000",side="buy",size=1):
         try:
             payload = {
-            "product_symbol": "SHIBUSD",
+            "product_symbol": "AVAXUSD",
             "limit_price":limit_price,
             "size":size,
             "side":side,
@@ -312,6 +313,74 @@ class DeltaExchangeRFGaizy:
 
         except Exception as e:
             print(f"Error in place_order_bracket_limit function: {e}")
+    
+    def update_bracket_order(self, order_id, product_symbol="AVAXUSD", 
+                        bracket_stop_loss_price=None, bracket_stop_loss_limit_price=None,
+                        bracket_take_profit_price=None, bracket_take_profit_limit_price=None,
+                        bracket_trail_amount=None, bracket_stop_trigger_method="last_traded_price"):
+        """
+        Update bracket order parameters for an existing order
+        
+        Args:
+            order_id (int): Order ID for which bracket params are being updated
+            product_symbol (str): Product symbol (default: "AVAXUSD")
+            bracket_stop_loss_price (str, optional): Stop loss trigger price
+            bracket_stop_loss_limit_price (str, optional): Stop loss limit price
+            bracket_take_profit_price (str, optional): Take profit trigger price
+            bracket_take_profit_limit_price (str, optional): Take profit limit price
+            bracket_trail_amount (str, optional): Trail amount for bracket order
+            bracket_stop_trigger_method (str): Stop order trigger method (default: "last_traded_price")
+        """
+        try:
+            # Build payload with only provided parameters
+            payload = {
+                "id": order_id,
+                "product_symbol": product_symbol,
+                "bracket_stop_trigger_method": bracket_stop_trigger_method
+            }
+            
+            # Add optional parameters only if they are provided
+            if bracket_stop_loss_price is not None:
+                payload["bracket_stop_loss_price"] = str(bracket_stop_loss_price)
+            
+            if bracket_stop_loss_limit_price is not None:
+                payload["bracket_stop_loss_limit_price"] = str(bracket_stop_loss_limit_price)
+            
+            if bracket_take_profit_price is not None:
+                payload["bracket_take_profit_price"] = str(bracket_take_profit_price)
+            
+            if bracket_take_profit_limit_price is not None:
+                payload["bracket_take_profit_limit_price"] = str(bracket_take_profit_limit_price)
+            
+            if bracket_trail_amount is not None:
+                payload["bracket_trail_amount"] = str(bracket_trail_amount)
+
+            method = 'PUT'
+            path = '/v2/orders/bracket'
+            url = self.base_url + path
+            timestamp = str(int(time.time()))
+            query_string = ''
+            payload_json = json.dumps(payload, separators=(',', ':'))  # compact format
+            signature_data = method + timestamp + path + query_string + payload_json
+            signature = self.generate_signature(self.api_secret, signature_data)
+
+            headers = {
+                'api-key': self.api_key,
+                'timestamp': timestamp,
+                'signature': signature,
+                'User-Agent': 'python-rest-client',
+                'Content-Type': 'application/json'
+            }
+
+            response = requests.put(url, headers=headers, data=payload_json)
+            print(f"Update Bracket Response Code: {response.status_code}")
+            print(f"Update Bracket Response Body: {response.json()}")
+            
+            return response.json()
+
+        except Exception as e:
+            print(f"Error in update_bracket_order function: {e}")
+            return None
 
     def order_status(self, order_id):
         try:
@@ -404,16 +473,16 @@ class DeltaExchangeRFGaizy:
             print(f"Error getting active orders: {e}")
             return None
         
-    def get_active_positions_SHIBA(self):
-        """Get active positions from Delta Exchange for SHIBUSD (product_id: 92570)"""
+    def get_active_positions_bitcoin(self):
+        """Get active positions from Delta Exchange for AVAXUSD (product_id: 14830)"""
         try:
             method = "GET"
             path = "/v2/positions"
             url = self.base_url + path
             timestamp = str(int(time.time()))
             
-            # Build query parameters for SHIBUSD
-            params = {'product_id': '92570'}
+            # Build query parameters for AVAXUSD
+            params = {'product_id': '14830'}
             
             # Build query string
             query_string = '&'.join([f"{k}={v}" for k, v in params.items()])
@@ -448,15 +517,15 @@ class DeltaExchangeRFGaizy:
             return None
         
     def get_active_positions(self):
-        """Get active positions from Delta Exchange for ETHUSD (product_id: 1699)"""
+        """Get active positions from Delta Exchange for DOGEUSD (product_id: 14830)"""
         try:
             method = "GET"
             path = "/v2/positions"
             url = self.base_url + path
             timestamp = str(int(time.time()))
             
-            # Build query parameters for ETHUSD
-            params = {'product_id': '1699'}
+            # Build query parameters for DOGEUSD
+            params = {'product_id': '14830'}
             
             # Build query string
             query_string = '&'.join([f"{k}={v}" for k, v in params.items()])
@@ -525,14 +594,14 @@ class DeltaExchangeRFGaizy:
                     self.account_balance = float(self.get_usd_balance())
                     self.base_price = float(self.get_market_price()) * self.min_lot
                     self.margin = self.account_balance/self.base_price
-                    self.base = self.margin*self.leverage_multiplier/2 # use something like kelly's criteria
+                    self.base = self.margin*self.base_leverage/3.3 # use something like kelly's criteria
                     print(f"You can trade for base_size {int(self.margin)} without using any leverage and {int(self.margin*self.base_leverage)} with base leverage")
             else:
-                self.df = pd.read_csv(r"C:\Users\vaibh\OneDrive\Desktop\delta\SHIBUSD_Final.csv")
+                self.df = pd.read_csv(r"C:\Users\vaibh\OneDrive\Desktop\delta\AVAXUSD_Final.csv")
                 self.account_balance = float(self.get_usd_balance())
                 self.base_price = float(self.get_market_price()) * self.min_lot
                 self.margin = self.account_balance/self.base_price
-                self.base = self.margin*self.base_leverage/2  # use something like the kelly's criteria's part
+                self.base = self.margin*self.base_leverage/3.3  # use something like the kelly's criteria's part
                 print(f"You can trade for base_size {int(self.margin)} without using any leverage and {int(self.margin*self.base_leverage)} with base leverage")
         except Exception as e:
             print(f"Exception in get_base_margin_size")
@@ -577,12 +646,12 @@ class DeltaExchangeRFGaizy:
             current_time = self.get_current_datetime()
             print(f"Fetching data at: {current_time}")
             
-            self.df = self.broker.get_ticker_data(symbol='SHIBUSD') # current time / other things need to be accounted for
+            self.df = self.broker.get_ticker_data(symbol='AVAXUSD') # current time / other things need to be accounted for
             
             self.df['Timestamp'] = pd.to_datetime(self.df['time'],unit='s')
             self.df.sort_values(by='Timestamp',ascending=False,inplace=True)
             self.df = self.df.iloc[::-1].reset_index(drop=True)
-            self.df.to_csv("SHIBUSD_Indicator.csv")
+            self.df.to_csv("AVAXUSD_Indicator.csv")
                 
         except Exception as e:
             print(f"Error occured in fetching the data : {e}")
@@ -606,7 +675,7 @@ class DeltaExchangeRFGaizy:
 
         Args:
             value (int or str): Leverage to set (e.g., 10).
-            product_id (int or str): The Delta Exchange product ID (e.g., 92570 for SHIBUSD).
+            product_id (int or str): The Delta Exchange product ID (e.g., 14830 for AVAXUSD).
         """
         import time
         import json
@@ -722,13 +791,8 @@ class DeltaExchangeRFGaizy:
             self.df = self.df.drop(columns=columns_to_drop)
             # print(self.df)
             print(self.df.tail(1))
-            self.df.to_csv('SHIBUSD_Indicator.csv')
-        except Exception as e:
-            print(f"Error occured in calculating the signal : {e}")
-
-    def execute_signals(self):
-        try:
-            self.df = self.df.tail(600)
+            self.df.to_csv('AVAXUSD_Indicator.csv')
+            self.df = self.df.tail(3000)
             self.df['Signal_Final'] = 0
 
             # Initialize RF signal tracking variables
@@ -834,7 +898,119 @@ class DeltaExchangeRFGaizy:
                 # Assign the final signal
                 self.df.iat[i, self.df.columns.get_loc('Signal_Final')] = signal
 
-            self.df.to_csv('SHIBUSD_Final.csv')
+            self.df.to_csv('AVAXUSD_Final.csv')
+        except Exception as e:
+            print(f"Error occured in calculating the signal : {e}")
+
+    def execute_signals(self):
+        try:
+            # self.df = self.df.tail(3000)
+            # self.df['Signal_Final'] = 0
+
+            # # Initialize RF signal tracking variables
+            # last_rf_buy_signal = False
+            # last_rf_sell_signal = False
+            # rf_signal_candle = -1
+            # rf_used = False
+
+            # # Initialize Arrow signal tracking variables
+            # last_green_arrow = False
+            # last_red_arrow = False
+            # arrow_signal_candle = -1
+            # arrow_used = False
+
+            # for i in range(len(self.df)):
+            #     row = self.df.iloc[i]
+            #     prev_row = self.df.iloc[i - 1] if i > 0 else None
+
+            #     # Detect new RF signals (transition from 0 to 1)
+            #     current_rf_buy = row['RF_BuySignal'] == 1
+            #     current_rf_sell = row['RF_SellSignal'] == 1
+
+            #     new_rf_buy = current_rf_buy and (prev_row is None or prev_row['RF_BuySignal'] != 1)
+            #     new_rf_sell = current_rf_sell and (prev_row is None or prev_row['RF_SellSignal'] != 1)
+
+            #     # Detect new Arrow signals
+            #     new_green_arrow = row['GreenArrow'] == 1 and (prev_row is None or prev_row['GreenArrow'] != 1)
+            #     new_red_arrow = row['RedArrow'] == 1 and (prev_row is None or prev_row['RedArrow'] != 1)
+
+            #     # Update RF signal tracking
+            #     if new_rf_buy:
+            #         last_rf_buy_signal = True
+            #         last_rf_sell_signal = False
+            #         rf_signal_candle = i
+            #         rf_used = False
+            #     elif new_rf_sell:
+            #         last_rf_sell_signal = True
+            #         last_rf_buy_signal = False
+            #         rf_signal_candle = i
+            #         rf_used = False
+
+            #     # Update Arrow signal tracking
+            #     if new_green_arrow:
+            #         last_green_arrow = True
+            #         last_red_arrow = False
+            #         arrow_signal_candle = i
+            #         arrow_used = False
+            #     elif new_red_arrow:
+            #         last_red_arrow = True
+            #         last_green_arrow = False
+            #         arrow_signal_candle = i
+            #         arrow_used = False
+
+            #     # Reset RF signals if they're older than 1 candle and not used
+            #     elif (i - rf_signal_candle) > 1 and (last_rf_buy_signal or last_rf_sell_signal):
+            #         last_rf_buy_signal = False
+            #         last_rf_sell_signal = False
+            #         rf_used = False
+
+            #     # Reset Arrow signals if they're older than 1 candle and not used
+            #     elif (i - arrow_signal_candle) > 1 and (last_green_arrow or last_red_arrow):
+            #         last_green_arrow = False
+            #         last_red_arrow = False
+            #         arrow_used = False
+
+            #     signal = 0  # Default
+
+            #     # === Range Filter (RF) + IB_Box Confirmation ===
+            #     # Allow signals within 1 candle of each other in BOTH directions
+                
+            #     # Scenario A: RF signal first, then Arrow signal
+            #     # Condition A1: RF and Arrow signals in same candle
+            #     if new_rf_buy and row['GreenArrow'] == 1 and not rf_used:
+            #         signal = 1
+            #         rf_used = True
+            #         last_rf_buy_signal = False
+            #     elif new_rf_sell and row['RedArrow'] == 1 and not rf_used:
+            #         signal = -1
+            #         rf_used = True
+            #         last_rf_sell_signal = False
+                
+            #     # Condition A2: RF signal, then Arrow signal in immediate next candle
+            #     elif last_rf_buy_signal and not rf_used and row['GreenArrow'] == 1 and (i - rf_signal_candle) == 1:
+            #         signal = 1
+            #         rf_used = True
+            #         last_rf_buy_signal = False
+            #     elif last_rf_sell_signal and not rf_used and row['RedArrow'] == 1 and (i - rf_signal_candle) == 1:
+            #         signal = -1
+            #         rf_used = True
+            #         last_rf_sell_signal = False
+
+            #     # Scenario B: Arrow signal first, then RF signal
+            #     # Condition B1: Arrow signal, then RF signal in immediate next candle
+            #     elif last_green_arrow and not arrow_used and new_rf_buy and (i - arrow_signal_candle) == 1:
+            #         signal = 1
+            #         arrow_used = True
+            #         last_green_arrow = False
+            #     elif last_red_arrow and not arrow_used and new_rf_sell and (i - arrow_signal_candle) == 1:
+            #         signal = -1
+            #         arrow_used = True
+            #         last_red_arrow = False
+
+            #     # Assign the final signal
+            #     self.df.iat[i, self.df.columns.get_loc('Signal_Final')] = signal
+
+            # self.df.to_csv('AVAXUSD_Final.csv')
 
             # === Execute Latest Signal ===
             # last_candle = self.df.iloc[-1]
@@ -861,7 +1037,7 @@ class DeltaExchangeRFGaizy:
                 if sl_price is not None and tp_price is not None:
                     stop_limit = sl_price + 10 if side == "buy" else sl_price + 10
                     tp_limit = tp_price - 10 if side == "buy" else tp_price + 10
-                    self.set_leverage_delta(value=self.base_leverage,product_id="92570")
+                    self.set_leverage_delta(value=self.base_leverage,product_id="14830")
                     self.leverage_check()
                     self.get_base_margin_size() # updates the self.base size
                     self.place_order_market(side=side, size=int(self.base))
@@ -882,13 +1058,37 @@ class DeltaExchangeRFGaizy:
             print(f"Error occurred in execution: {e}")
             import traceback
             traceback.print_exc()
+    
+    def is_trading_allowed(self):
+        from datetime import datetime,time
+        import pytz
+        # Get current IST time
+        ist = pytz.timezone('Asia/Kolkata')
+        now = datetime.now(ist).time()
+        # Define dead zones
+        dead_zone_1_start = time(1, 30)   # 1:30 AM
+        dead_zone_1_end   = time(3, 30)   # 3:30 AM
+        
+        dead_zone_2_start = time(3, 30)   # 3:30 AM
+        dead_zone_2_end   = time(13, 30)  # 1:30 PM
+        print(f"current time is {now}")
+        print(f"dead zone 1 time is between {dead_zone_1_start}:{dead_zone_1_end}")
+        print(f"dead zone 2 time is between {dead_zone_2_start}:{dead_zone_2_end}")
+
+        # Check if current time is in any dead zone
+        in_dead_zone_1 = dead_zone_1_start <= now < dead_zone_1_end
+        in_dead_zone_2 = dead_zone_2_start <= now < dead_zone_2_end
+
+        # Return True if not in dead zones
+        return not (in_dead_zone_1 or in_dead_zone_2)
 
     def test(self):
         try:
             self.connect()
             # self.get_active_orders()
             # self.get_active_positions_bitcoin()
-            self.place_order_market(side="buy",size=1)
+            # self.place_order_market(side="buy",size=1)
+            # self.update_bracket_order(order_id="")
             exit(0)
         except Exception as e:
             print(f"Error in test run : {e}")
@@ -897,20 +1097,29 @@ class DeltaExchangeRFGaizy:
 
     def run(self):
         try:
-            print(f"Starting bot at: {self.get_current_datetime()}")
-            self.connect()
-            # if self.get_active_positions(): # true means size 0 no position
-            if self.get_active_positions_SHIBA():
-                print(f"Current status of get_active_positions is {self.get_active_positions_SHIBA()}")
-                self.fetch_data()
-                self.calculate_signals()
-                self.execute_signals()
-                import time
-                time.sleep(5)
-            else:
-                print(f"Status of the position being closed is {self.get_active_positions_SHIBA()}")
-                import time
-                time.sleep(10)
+            if self.is_trading_allowed():
+                print(f"Starting bot at: {self.get_current_datetime()}")
+                self.connect()
+                # if self.get_active_positions(): # true means size 0 no position
+                if self.get_active_positions_bitcoin():
+                    print(f"Current status of get_active_positions is {self.get_active_positions_bitcoin()}")
+                    self.fetch_data()
+                    self.calculate_signals()
+                    import time
+                    last_candle = self.df.iloc[-1]
+                    last_signal = last_candle['Signal_Final']
+                    if last_signal != 0:
+                        self.execute_signals()
+                        print(f'Signal executed. Sleeping for {self.cooldown_duration}')
+                        time.sleep(self.cooldown_duration)
+                    else:
+                        time.sleep(5)
+                    import time
+                    time.sleep(5)
+                else:
+                    print(f"Status of the position being closed is {self.get_active_positions_bitcoin()}")
+                    import time
+                    time.sleep(10)
 
         except Exception as e:
             print(f"Error occured in run : {e}")
@@ -918,13 +1127,14 @@ class DeltaExchangeRFGaizy:
             traceback.print_exc()
 
 if __name__ == "__main__":
-    api_key = "MZvQgXnmlxSqWnfJRRcvBymh6FFqs5"
-    api_secret = "nqERtehNDx4JAyfA8pRiuG3VsCZOor6dF33Ttp8SH7XWObo9D2ZnqVflsoMz"
-    base_url = "https://cdn-ind.testnet.deltaex.org"
+    api_key = "ToSrsEfM1Uk9uWXB4XE8AuWBSxRNwd"
+    api_secret = "WurI06CuZU6QGU0lqq8L7UPQSHbMjsgiOj1Kz3kmtQAUHbREAJgjYyXZUa1s"
+    # base_url = "https://cdn-ind.testnet.deltaex.org"
+    base_url = "https://api.india.delta.exchange"
     Debot = DeltaExchangeRFGaizy(api_key=api_key,api_secret=api_secret,base_url=base_url)
     while True:
         try:
-            Debot.run()
-            # Debot.test()
+            # Debot.run()
+            Debot.test()
         except Exception as e:
             print(f"Error in run : {e}")

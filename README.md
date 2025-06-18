@@ -19,3 +19,15 @@
 - finally check the rsi_gaizy
 
 - everything could be done in a day
+
+# bitcoin - 27
+
+# ethereum - 3136
+
+# solena - 14823
+
+# shiba - 92570
+
+# avaxusd - 14830
+
+# xrpusd - 14969
